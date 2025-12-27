@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { TrendingUp, TrendingDown, ExternalLink } from 'lucide-react'
 import { useApi } from '../hooks/useApi'
-import { formatPrice, formatPercent } from '../utils/format'
+import { formatPercent } from '../utils/format'
 
 interface MarketData {
   index_name: string

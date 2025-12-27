@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 import { useApi } from '../hooks/useApi'
-import { formatCurrency, formatPercent, formatPrice } from '../utils/format'
+import { formatPercent, formatPrice } from '../utils/format'
 
 interface Position {
   symbol: string
