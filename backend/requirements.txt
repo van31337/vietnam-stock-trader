@@ -1,0 +1,45 @@
+# Vietnam Stock Trader - Backend Dependencies
+# Core Framework
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+pydantic==2.6.1
+pydantic-settings==2.1.0
+
+# Database
+sqlalchemy==2.0.25
+aiosqlite==0.19.0
+
+# Vietnamese Stock Data
+vnstock==3.0.9
+
+# SSI FastConnect API
+requests==2.31.0
+websockets==12.0
+aiohttp==3.9.3
+
+# News and Sentiment Analysis
+feedparser==6.0.11
+newspaper3k==0.2.8
+textblob==0.18.0
+underthesea==6.8.4
+
+# Scheduling
+apscheduler==3.10.4
+
+# Data Processing
+pandas==2.2.0
+numpy==1.26.4
+ta==0.11.0
+
+# Notifications
+python-telegram-bot==21.0.1
+
+# Security
+python-dotenv==1.0.1
+cryptography==42.0.2
+
+# Logging
+loguru==0.7.2
+
+# CORS for dashboard
+python-multipart==0.0.9
