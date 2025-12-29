@@ -2,6 +2,14 @@
 Portfolio Tracker - Tracks imaginary $300 investment
 Run this script to check portfolio status and make trading decisions
 """
+import sys
+import io
+
+# Fix encoding for Windows Task Scheduler
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 import warnings
 warnings.filterwarnings('ignore')
 import json
@@ -183,8 +191,8 @@ def update_portfolio():
             })
 
         # Print position
-        emoji = "🟢" if pos['pnl'] >= 0 else "🔴"
-        print(f"\n{emoji} {pos['symbol']}")
+        indicator = "[+]" if pos['pnl'] >= 0 else "[-]"
+        print(f"\n{indicator} {pos['symbol']}")
         print(f"   Shares: {pos['shares']} @ {pos['buy_price']:,.0f} VND")
         print(f"   Current: {current_price:,.0f} VND")
         print(f"   P&L: {pos['pnl']:+,.0f} VND ({pos['pnl_percent']:+.2f}%)")
@@ -218,7 +226,7 @@ def update_portfolio():
     # Handle actions
     if actions:
         print(f"\n{'='*60}")
-        print("⚠️  TRADING SIGNALS")
+        print(">>> TRADING SIGNALS <<<")
         print(f"{'='*60}")
         for action in actions:
             print(f"{action['action']}: {action['symbol']} - {action['reason']}")
@@ -360,7 +368,7 @@ def generate_dashboard(portfolio, total_value, total_pnl, total_pnl_pct):
     with open(dashboard_path, 'w', encoding='utf-8') as f:
         f.write(html)
 
-    print(f"\n✅ Dashboard updated: {dashboard_path}")
+    print(f"\n[OK] Dashboard updated: {dashboard_path}")
 
 def execute_trade(action, symbol, shares, price, reason):
     """Execute a trade and update portfolio"""
@@ -391,7 +399,7 @@ def execute_trade(action, symbol, shares, price, reason):
                     "reason": reason
                 })
 
-                print(f"✅ SOLD {shares} {symbol} @ {price:,.0f} VND")
+                print(f"[OK] SOLD {shares} {symbol} @ {price:,.0f} VND")
                 print(f"   P&L: {pos['final_pnl']:+,.0f} VND")
                 break
 
@@ -425,9 +433,9 @@ def execute_trade(action, symbol, shares, price, reason):
                 "reason": reason
             })
 
-            print(f"✅ BOUGHT {shares} {symbol} @ {price:,.0f} VND")
+            print(f"[OK] BOUGHT {shares} {symbol} @ {price:,.0f} VND")
         else:
-            print(f"❌ Insufficient cash. Need {cost:,.0f}, have {portfolio['cash']:,.0f}")
+            print(f"[ERR] Insufficient cash. Need {cost:,.0f}, have {portfolio['cash']:,.0f}")
 
     save_portfolio(portfolio)
     return portfolio
