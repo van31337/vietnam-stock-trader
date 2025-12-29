@@ -123,6 +123,13 @@ def analyze_stock(symbol):
         sma20 = float(close.rolling(20).mean().iloc[-1]) * 1000
         sma50 = float(close.rolling(50).mean().iloc[-1]) * 1000 if len(df) >= 50 else sma20
 
+        # MACD
+        ema12 = close.ewm(span=12).mean()
+        ema26 = close.ewm(span=26).mean()
+        macd = ema12 - ema26
+        signal = macd.ewm(span=9).mean()
+        macd_bullish = float(macd.iloc[-1]) > float(signal.iloc[-1])
+
         # Trend
         if price > sma20 > sma50:
             trend = "UPTREND"
@@ -131,15 +138,222 @@ def analyze_stock(symbol):
         else:
             trend = "SIDEWAYS"
 
+        # Calculate score
+        score = 0
+        if trend == "UPTREND":
+            score += 30
+        elif trend == "DOWNTREND":
+            score -= 30
+        if rsi < 30:
+            score += 20  # Oversold - buy signal
+        elif rsi > 70:
+            score -= 20  # Overbought - sell signal
+        if macd_bullish:
+            score += 20
+        else:
+            score -= 10
+        if price > sma20:
+            score += 10
+
         return {
+            "symbol": symbol,
             "price": price,
             "rsi": rsi,
             "sma20": sma20,
             "sma50": sma50,
-            "trend": trend
+            "trend": trend,
+            "macd_bullish": macd_bullish,
+            "score": score
         }
-    except:
+    except Exception as e:
         return None
+
+# Watchlist of stocks to analyze for buying
+WATCHLIST = ["GAS", "FPT", "VNM", "MWG", "HPG", "VCB", "TCB", "VHM", "VIC", "MSN"]
+
+def find_buy_opportunities(cash_available):
+    """Scan watchlist for buy opportunities"""
+    print("\n[SCAN] Analyzing watchlist for opportunities...")
+    opportunities = []
+
+    for symbol in WATCHLIST:
+        analysis = analyze_stock(symbol)
+        if analysis is None:
+            continue
+
+        price = analysis['price']
+        min_cost = price * 100  # Minimum 100 shares
+
+        # Only consider if we can afford it and score is positive
+        if min_cost <= cash_available and analysis['score'] >= 30:
+            opportunities.append(analysis)
+            print(f"   {symbol}: Score {analysis['score']:+d}, {analysis['trend']}, RSI {analysis['rsi']:.1f}, Price {price:,.0f}")
+
+    # Sort by score descending
+    opportunities.sort(key=lambda x: x['score'], reverse=True)
+    return opportunities
+
+def auto_trade():
+    """Automatic trading - execute signals and find new opportunities"""
+    portfolio = load_portfolio()
+    if not portfolio:
+        portfolio = init_portfolio()
+
+    print("=" * 60)
+    print("AUTO-TRADING MODE")
+    print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print("=" * 60)
+
+    # First, update prices and check for sell signals
+    sells_executed = []
+
+    for pos in portfolio['positions']:
+        if pos['status'] != 'OPEN':
+            continue
+
+        current_price = get_current_price(pos['symbol'])
+        if current_price is None:
+            current_price = pos['current_price']
+
+        pos['current_price'] = current_price
+        pos['current_value'] = current_price * pos['shares']
+        pos['pnl'] = pos['current_value'] - pos['buy_cost']
+        pos['pnl_percent'] = (pos['pnl'] / pos['buy_cost']) * 100
+
+        # Check stop loss - AUTO SELL
+        if current_price <= pos['stop_loss']:
+            print(f"\n[AUTO-SELL] {pos['symbol']} - STOP LOSS triggered!")
+            pos['status'] = 'CLOSED'
+            pos['sell_price'] = current_price
+            pos['sell_date'] = datetime.now().strftime('%Y-%m-%d')
+            pos['final_pnl'] = (current_price * pos['shares']) - pos['buy_cost']
+            portfolio['cash'] += current_price * pos['shares']
+            portfolio['closed_positions'].append(pos.copy())
+            portfolio['trades'].append({
+                "date": datetime.now().strftime('%Y-%m-%d'),
+                "action": "SELL",
+                "symbol": pos['symbol'],
+                "shares": pos['shares'],
+                "price": current_price,
+                "total": current_price * pos['shares'],
+                "reason": f"STOP LOSS at {current_price:,.0f}"
+            })
+            sells_executed.append(pos['symbol'])
+            print(f"   Sold {pos['shares']} @ {current_price:,.0f} | P&L: {pos['final_pnl']:+,.0f} VND")
+
+        # Check target - AUTO SELL
+        elif current_price >= pos['target']:
+            print(f"\n[AUTO-SELL] {pos['symbol']} - TARGET reached!")
+            pos['status'] = 'CLOSED'
+            pos['sell_price'] = current_price
+            pos['sell_date'] = datetime.now().strftime('%Y-%m-%d')
+            pos['final_pnl'] = (current_price * pos['shares']) - pos['buy_cost']
+            portfolio['cash'] += current_price * pos['shares']
+            portfolio['closed_positions'].append(pos.copy())
+            portfolio['trades'].append({
+                "date": datetime.now().strftime('%Y-%m-%d'),
+                "action": "SELL",
+                "symbol": pos['symbol'],
+                "shares": pos['shares'],
+                "price": current_price,
+                "total": current_price * pos['shares'],
+                "reason": f"TARGET REACHED at {current_price:,.0f}"
+            })
+            sells_executed.append(pos['symbol'])
+            print(f"   Sold {pos['shares']} @ {current_price:,.0f} | P&L: {pos['final_pnl']:+,.0f} VND")
+
+        else:
+            indicator = "[+]" if pos['pnl'] >= 0 else "[-]"
+            print(f"\n{indicator} HOLDING {pos['symbol']}")
+            print(f"   {pos['shares']} shares @ {pos['buy_price']:,.0f} -> {current_price:,.0f}")
+            print(f"   P&L: {pos['pnl']:+,.0f} VND ({pos['pnl_percent']:+.2f}%)")
+
+    # Remove closed positions from active list
+    portfolio['positions'] = [p for p in portfolio['positions'] if p['status'] == 'OPEN']
+
+    # Check for buy opportunities if we have cash
+    cash = portfolio['cash']
+    open_positions = [p['symbol'] for p in portfolio['positions'] if p['status'] == 'OPEN']
+
+    if cash >= 5000000:  # At least 5M VND to consider buying
+        opportunities = find_buy_opportunities(cash)
+
+        # Filter out stocks we already own
+        opportunities = [o for o in opportunities if o['symbol'] not in open_positions]
+
+        if opportunities:
+            best = opportunities[0]
+            shares = 100  # Buy minimum lot
+            cost = best['price'] * shares
+
+            if cost <= cash:
+                print(f"\n[AUTO-BUY] {best['symbol']} - Score {best['score']:+d}")
+                portfolio['positions'].append({
+                    "symbol": best['symbol'],
+                    "shares": shares,
+                    "buy_price": best['price'],
+                    "buy_date": datetime.now().strftime('%Y-%m-%d'),
+                    "buy_cost": cost,
+                    "target": best['price'] * 1.10,  # +10% target
+                    "stop_loss": best['price'] * 0.95,  # -5% stop loss
+                    "status": "OPEN",
+                    "current_price": best['price'],
+                    "current_value": cost,
+                    "pnl": 0,
+                    "pnl_percent": 0
+                })
+                portfolio['cash'] -= cost
+                portfolio['trades'].append({
+                    "date": datetime.now().strftime('%Y-%m-%d'),
+                    "action": "BUY",
+                    "symbol": best['symbol'],
+                    "shares": shares,
+                    "price": best['price'],
+                    "total": cost,
+                    "reason": f"Score {best['score']:+d}, {best['trend']}, RSI {best['rsi']:.1f}"
+                })
+                print(f"   Bought {shares} @ {best['price']:,.0f} = {cost:,.0f} VND")
+        else:
+            print("\n[SCAN] No good opportunities found")
+    else:
+        print(f"\n[CASH] {cash:,.0f} VND - waiting for better opportunity")
+
+    # Calculate totals
+    total_value = portfolio['cash']
+    for pos in portfolio['positions']:
+        if pos['status'] == 'OPEN':
+            total_value += pos['current_value']
+
+    initial = portfolio['initial_budget']
+    total_pnl = total_value - initial
+    total_pnl_pct = (total_pnl / initial) * 100
+
+    # Record history
+    portfolio['history'].append({
+        "date": datetime.now().strftime('%Y-%m-%d %H:%M'),
+        "total_value": total_value,
+        "cash": portfolio['cash'],
+        "invested": total_value - portfolio['cash'],
+        "pnl": total_pnl,
+        "pnl_percent": total_pnl_pct
+    })
+
+    portfolio['last_updated'] = datetime.now().isoformat()
+    save_portfolio(portfolio)
+
+    # Print summary
+    print(f"\n{'='*60}")
+    print("PORTFOLIO SUMMARY")
+    print(f"{'='*60}")
+    print(f"Cash: {portfolio['cash']:,.0f} VND")
+    print(f"Invested: {total_value - portfolio['cash']:,.0f} VND")
+    print(f"Total Value: {total_value:,.0f} VND")
+    print(f"Total P&L: {total_pnl:+,.0f} VND ({total_pnl_pct:+.2f}%)")
+
+    # Generate dashboard
+    generate_dashboard(portfolio, total_value, total_pnl, total_pnl_pct)
+
+    return portfolio
 
 def update_portfolio():
     """Update portfolio with current prices and check signals"""
@@ -441,20 +655,19 @@ def execute_trade(action, symbol, shares, price, reason):
     return portfolio
 
 if __name__ == '__main__':
-    import sys
+    args = sys.argv[1:] if len(sys.argv) > 1 else []
 
-    if len(sys.argv) > 1:
-        cmd = sys.argv[1]
-        if cmd == 'init':
-            init_portfolio()
-            print("Portfolio initialized!")
-        elif cmd == 'update':
-            update_portfolio()
+    if 'init' in args:
+        init_portfolio()
+        print("Portfolio initialized!")
+    elif 'update' in args:
+        # Just update prices, no auto-trading
+        update_portfolio()
     else:
-        # Default: update portfolio
+        # Default: auto-trade mode (check signals, execute trades, find opportunities)
         portfolio = load_portfolio()
         if not portfolio:
             print("Initializing new portfolio...")
             portfolio = init_portfolio()
 
-        update_portfolio()
+        auto_trade()
